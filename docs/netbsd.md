@@ -94,8 +94,9 @@ You can compile a kernel with KASAN to increase the chances of finding bugs.
 	#no options	SVS
 	```
 
-3. Compile the kernel with KASAN
+4. Compile the kernel with KASAN
 	```sh
+	$ ./build.sh -m amd64 -j4 tools
 	$ ./build.sh -m amd64 -j4 kernel=SYZKALLER
 
 	```
