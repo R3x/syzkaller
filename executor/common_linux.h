@@ -9,6 +9,7 @@
 #include <unistd.h>
 
 #if SYZ_EXECUTOR
+const int kExtraCoverSize = 256 << 10;
 struct cover_t;
 static void cover_reset(cover_t* cov);
 #endif
@@ -1791,7 +1792,12 @@ static void sandbox_common()
 #endif
 
 	struct rlimit rlim;
-	rlim.rlim_cur = rlim.rlim_max = 200 << 20;
+#if SYZ_EXECUTOR
+	rlim.rlim_cur = rlim.rlim_max = (200 << 20) +
+					(kMaxThreads * kCoverSize + kExtraCoverSize) * sizeof(void*);
+#else
+	rlim.rlim_cur = rlim.rlim_max = (200 << 20);
+#endif
 	setrlimit(RLIMIT_AS, &rlim);
 	rlim.rlim_cur = rlim.rlim_max = 32 << 20;
 	setrlimit(RLIMIT_MEMLOCK, &rlim);

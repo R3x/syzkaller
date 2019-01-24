@@ -119,6 +119,7 @@ static sandbox_type flag_sandbox;
 static bool flag_enable_tun;
 static bool flag_enable_net_dev;
 static bool flag_enable_fault_injection;
+static bool flag_extra_cover;
 
 static bool flag_collect_cover;
 static bool flag_dedup_cover;
@@ -208,6 +209,8 @@ struct thread_t {
 static thread_t threads[kMaxThreads];
 static thread_t* last_scheduled;
 
+static cover_t extra_cov;
+
 struct res_t {
 	bool executed;
 	uint64 val;
@@ -288,6 +291,7 @@ static thread_t* schedule_call(int call_index, int call_num, bool colliding, uin
 static void handle_completion(thread_t* th);
 static void copyout_call_results(thread_t* th);
 static void write_call_output(thread_t* th, bool finished);
+static void write_extra_output();
 static void execute_call(thread_t* th);
 static void thread_create(thread_t* th, int id);
 static void* worker_thread(void* arg);
@@ -366,7 +370,12 @@ int main(int argc, char** argv)
 	if (flag_cover) {
 		for (int i = 0; i < kMaxThreads; i++) {
 			threads[i].cov.fd = kCoverFd + i;
-			cover_open(&threads[i].cov);
+			cover_open(&threads[i].cov, false);
+		}
+		cover_open(&extra_cov, true);
+		if (flag_extra_cover) {
+			// Don't enable comps because we don't use them in the fuzzer yet.
+			cover_enable(&extra_cov, false, true);
 		}
 	}
 
@@ -449,6 +458,7 @@ void parse_env_flags(uint64 flags)
 	flag_enable_tun = flags & (1 << 5);
 	flag_enable_net_dev = flags & (1 << 6);
 	flag_enable_fault_injection = flags & (1 << 7);
+	flag_extra_cover = flags & (1 << 8);
 }
 
 #if SYZ_EXECUTOR_USES_FORK_SERVER
@@ -557,8 +567,12 @@ void execute_one()
 retry:
 	uint64* input_pos = (uint64*)input_data;
 
-	if (flag_cover && !colliding && !flag_threaded)
-		cover_enable(&threads[0].cov, flag_collect_comps);
+	if (flag_cover && !colliding) {
+		if (!flag_threaded)
+			cover_enable(&threads[0].cov, flag_collect_comps, false);
+		if (flag_extra_cover)
+			cover_reset(&extra_cov);
+	}
 
 	int call_index = 0;
 	for (;;) {
@@ -719,6 +733,7 @@ retry:
 					write_call_output(th, false);
 				}
 			}
+			write_extra_output();
 		}
 	}
 
@@ -766,21 +781,21 @@ thread_t* schedule_call(int call_index, int call_num, bool colliding, uint64 cop
 }
 
 #if SYZ_EXECUTOR_USES_SHMEM
-template <typename cover_t>
-void write_coverage_signal(thread_t* th, uint32* signal_count_pos, uint32* cover_count_pos)
+template <typename cover_data_t>
+void write_coverage_signal(cover_t* cov, uint32* signal_count_pos, uint32* cover_count_pos)
 {
 	// Write out feedback signals.
 	// Currently it is code edges computed as xor of two subsequent basic block PCs.
-	cover_t* cover_data = ((cover_t*)th->cov.data) + 1;
+	cover_data_t* cover_data = ((cover_data_t*)cov->data) + 1;
 	uint32 nsig = 0;
-	cover_t prev = 0;
-	for (uint32 i = 0; i < th->cov.size; i++) {
-		cover_t pc = cover_data[i];
+	cover_data_t prev = 0;
+	for (uint32 i = 0; i < cov->size; i++) {
+		cover_data_t pc = cover_data[i];
 		if (!cover_check(pc)) {
 			debug("got bad pc: 0x%llx\n", (uint64)pc);
 			doexit(0);
 		}
-		cover_t sig = pc ^ prev;
+		cover_data_t sig = pc ^ prev;
 		prev = hash(pc);
 		if (dedup(sig))
 			continue;
@@ -793,9 +808,9 @@ void write_coverage_signal(thread_t* th, uint32* signal_count_pos, uint32* cover
 	if (!flag_collect_cover)
 		return;
 	// Write out real coverage (basic block PCs).
-	uint32 cover_size = th->cov.size;
+	uint32 cover_size = cov->size;
 	if (flag_dedup_cover) {
-		cover_t* end = cover_data + cover_size;
+		cover_data_t* end = cover_data + cover_size;
 		std::sort(cover_data, end);
 		cover_size = std::unique(cover_data, end) - cover_data;
 	}
@@ -814,8 +829,10 @@ void handle_completion(thread_t* th)
 		     event_isset(&th->ready), event_isset(&th->done), th->executing);
 	if (th->res != (long)-1)
 		copyout_call_results(th);
-	if (!collide && !th->colliding)
+	if (!collide && !th->colliding) {
 		write_call_output(th, true);
+		write_extra_output();
+	}
 	th->executing = false;
 	running--;
 	if (running < 0)
@@ -894,9 +911,9 @@ void write_call_output(thread_t* th, bool finished)
 		*comps_count_pos = comps_size;
 	} else if (flag_cover) {
 		if (is_kernel_64_bit)
-			write_coverage_signal<uint64>(th, signal_count_pos, cover_count_pos);
+			write_coverage_signal<uint64>(&th->cov, signal_count_pos, cover_count_pos);
 		else
-			write_coverage_signal<uint32>(th, signal_count_pos, cover_count_pos);
+			write_coverage_signal<uint32>(&th->cov, signal_count_pos, cover_count_pos);
 	}
 	debug_verbose("out #%u: index=%u num=%u errno=%d finished=%d blocked=%d sig=%u cover=%u comps=%u\n",
 		      completed, th->call_index, th->call_num, reserrno, finished, blocked,
@@ -922,6 +939,32 @@ void write_call_output(thread_t* th, bool finished)
 #endif
 }
 
+void write_extra_output()
+{
+#if SYZ_EXECUTOR_USES_SHMEM
+	if (!flag_cover || !flag_extra_cover || flag_collect_comps)
+		return;
+	cover_collect(&extra_cov);
+	if (!extra_cov.size)
+		return;
+	write_output(-1); // call index
+	write_output(-1); // call num
+	write_output(999); // errno
+	write_output(0); // call flags
+	uint32* signal_count_pos = write_output(0); // filled in later
+	uint32* cover_count_pos = write_output(0); // filled in later
+	write_output(0); // comps_count_pos
+	if (is_kernel_64_bit)
+		write_coverage_signal<uint64>(&extra_cov, signal_count_pos, cover_count_pos);
+	else
+		write_coverage_signal<uint32>(&extra_cov, signal_count_pos, cover_count_pos);
+	cover_reset(&extra_cov);
+	debug_verbose("extra: sig=%u cover=%u\n", *signal_count_pos, *cover_count_pos);
+	completed++;
+	write_completed(completed);
+#endif
+}
+
 void thread_create(thread_t* th, int id)
 {
 	th->created = true;
@@ -939,7 +982,7 @@ void* worker_thread(void* arg)
 	thread_t* th = (thread_t*)arg;
 
 	if (flag_cover)
-		cover_enable(&th->cov, flag_collect_comps);
+		cover_enable(&th->cov, flag_collect_comps, false);
 	for (;;) {
 		event_wait(&th->ready);
 		event_reset(&th->ready);

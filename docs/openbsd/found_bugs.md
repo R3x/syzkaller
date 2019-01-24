@@ -6,6 +6,20 @@ mailing list and are listed on the [dashboard](https://syzkaller.appspot.com/#op
 
 Newer bugs comes first.
 
+- [unveil: NULL pointer dereference](https://marc.info/?l=openbsd-cvs&m=154818960525456&w=2)
+
+- [fcntl: use-after-free in `lf_findoverlap()`](https://marc.info/?l=openbsd-cvs&m=154809417426357&w=2)
+
+- [setsockopt: incorrect mbuf padding](https://marc.info/?l=openbsd-cvs&m=154784437622409&w=2)
+
+- [read: missing locking](https://marc.info/?l=openbsd-cvs&m=154715201702848&w=2)
+
+- [write: lenient IP packet validation](https://marc.info/?l=openbsd-cvs&m=154684768026869&w=2)
+
+- [mbuf(9): mutating read-only mbuf](https://marc.info/?l=openbsd-cvs&m=154684739226800&w=2)
+
+- [setrlimit: lock ordering problem in `mi_switch()`](https://marc.info/?l=openbsd-cvs&m=154677960110593&w=2)
+
 - [switch(4): many affected syscalls due to mbuf corruption](https://marc.info/?l=openbsd-cvs&m=154600758019977&w=2)
 
 - [setsockopt: integer overflow in `ip_pcbopts()`](https://marc.info/?l=openbsd-cvs&m=154531248603735&w=2) [ERRATA-64-010](https://ftp.openbsd.org/pub/OpenBSD/patches/6.4/common/010_pcbopts.patch.sig)

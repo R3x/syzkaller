@@ -157,19 +157,102 @@ r0 = socket$inet_tcp(0x2, 0x1, 0x0)
 connect$inet(r0, &(0x7f0000000000)={0x2, 0x4594}, 0x10)
 `,
 		}, {`
-socket(2, 1, 0) = 3
-connect(3, {sa_family=2, sin_port=17812, sin_addr=0x7f000001}, 16) = 0
-`, `
-r0 = socket$inet_tcp(0x2, 0x1, 0x0)
-connect$inet(r0, &(0x7f0000000000)={0x2, 0x4594, @rand_addr=0x7f000001}, 0x10)
-`,
-		}, {`
 open("\x2f\x64\x65\x76\x2f\x73\x6e\x64\x2f\x73\x65\x71", 0) = 3
 fsetxattr(3, "\x73\x65\x63\x75\x72\x69\x74\x79\x2e\x73\x65\x6c\x69\x6e\x75\x78","\x73\x79\x73", 4, 0) = 0
 `, `
-r0 = open(&(0x7f0000000000)='/dev/snd/seq\x00', 0x0, 0x0)
+r0 = syz_open_dev$sndseq(&(0x7f0000000000)='/dev/snd/seq\x00', 0x0, 0x0)
 fsetxattr(r0, &(0x7f0000000040)=@known='security.selinux\x00', &(0x7f0000000080)='sys\x00', 0x4, 0x0)
 `,
+		}, {`
+socket(0x2, 0x1, 0) = 3
+connect(3, {sa_family=0x2, sin_port="\x1f\x90", sin_addr="\x7f\x00\x00\x01"}, 16) = -1
+`, `
+r0 = socket$inet_tcp(0x2, 0x1, 0x0)
+connect$inet(r0, &(0x7f0000000000)={0x2, 0x1f90, @rand_addr=0x7f000001}, 0x10)
+`,
+		}, {`
+socket(0x2, 0x1, 0) = 3
+connect(3, {sa_family=0x2, sin_port="\x1f\x90", sin_addr="\x00\x00\x00\x00\x7f\x00\x00\x01"}, 16) = -1
+`, `
+r0 = socket$inet_tcp(0x2, 0x1, 0x0)
+connect$inet(r0, &(0x7f0000000000)={0x2, 0x1f90, @rand_addr=0x7f000001}, 0x10)
+`,
+		}, {`
+socket(0x2, 0x1, 0) = 3
+connect(3, {sa_family=0x2, sin_port="\x1f\x90", sin_addr="\x00"}, 16) = -1
+`, `
+r0 = socket$inet_tcp(0x2, 0x1, 0x0)
+connect$inet(r0, &(0x7f0000000000)={0x2, 0x1f90}, 0x10)
+`,
+		}, {`
+socket(0x2, 0x1, 0) = 3
+connect(3, {sa_family=0x2, sin_port="\x1f\x90", sin_addr="\x00"}, 16) = -1
+`, `
+r0 = socket$inet_tcp(0x2, 0x1, 0x0)
+connect$inet(r0, &(0x7f0000000000)={0x2, 0x1f90}, 0x10)
+`,
+		}, {`
+connect(-1, {sa_family=0xa, sin6_port="\x30\x39",` +
+			`sin6_flowinfo="\x07\x5b\xcd\x7a",` +
+			`sin6_addr="\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x01",` +
+			`sin6_scope_id=4207869677}, 28) = -1
+`, `
+connect(0xffffffffffffffff, &(0x7f0000000000)=` +
+			`@in6={0xa, 0x3039, 0x75bcd7a, @rand_addr="00000000000000000000000000000001",` +
+			` 0xfacefeed}, 0x80)
+`,
+		}, {`
+connect(-1, {sa_family=0xa, sin6_port="\x30\x39",` +
+			` sin6_flowinfo="\x07\x5b\xcd\x7a",` +
+			` sin6_addr="\x00\x12\x00\x34\x00\x56\x00\x78\x00\x90\x00\xab\x00\xcd\x00\xef",` +
+			` sin6_scope_id=4207869677}, 28) = -1
+`, `
+connect(0xffffffffffffffff, &(0x7f0000000000)=` +
+			`@in6={0xa, 0x3039, 0x75bcd7a, @rand_addr="0012003400560078009000ab00cd00ef",` +
+			` 0xfacefeed}, 0x80)
+`,
+		}, {`
+socket(0xa, 0x2, 0) = 3
+sendto(3, "", 0, 0, {sa_family=0xa, sin6_port="\x4e\x24", sin6_flowinfo="\x00\x00\x00\x00",` +
+			` sin6_addr="\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00",` +
+			` sin6_scope_id=0}, 28) = -1
+`, `
+r0 = socket$inet6_udp(0xa, 0x2, 0x0)
+sendto$inet6(r0, &(0x7f0000000000), 0x0, 0x0, &(0x7f0000000040)={0xa, 0x4e24}, 0x1c)
+`,
+		}, {`
+open("\x2f\x64\x65\x76\x2f\x7a\x65\x72\x6f", "1") = 3
+`, `
+openat$zero(0xffffffffffffff9c, &(0x7f0000000000)='/dev/zero\x00', 0x31, 0x0)
+`,
+		}, {`
+open("\x2f\x64\x65\x76\x2f\x6c\x6f\x6f\x70\x30", 0) = 3
+`, `
+syz_open_dev$loop(&(0x7f0000000000)='/dev/loop0\x00', 0x0, 0x0)
+`,
+		}, {`
+open("\x2f\x64\x65\x76\x2f\x6c\x6f\x6f\x70\x31", 0) = 3
+`, `
+syz_open_dev$loop(&(0x7f0000000000)='/dev/loop1\x00', 0x1, 0x0)
+`,
+		}, {`
+open("\x2f\x64\x65\x76\x2f\x62\x75\x73\x2f\x75\x73\x62\x2f\x30\x30\x31\x2f\x30\x30\x31", 0) = 3
+`, `
+syz_open_dev$usb(&(0x7f0000000000)='/dev/bus/usb/001/001\x00', 0xb, 0x0)
+`,
+		}, {`
+openat(0xffffffffffffff9c, "\x2f\x64\x65\x76\x2f\x7a\x65\x72\x6f", 0x31, 0) = 3
+`, `
+openat$zero(0xffffffffffffff9c, &(0x7f0000000000)='/dev/zero\x00', 0x31, 0x0)
+`}, {`
+socket(0xa, 0x1, 0) = 3
+setsockopt(3, 0x29, 0x2a, {gr_interface=0, gr_group={sa_family=0xa, sin6_port="\x00\x00", sin6_flowinfo=` +
+			`"\x00\x00\x00\x00", sin6_addr="\xff\x02\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x01",` +
+			` sin6_scope_id=0}}, 136) = 0
+`, `
+r0 = socket$inet6_tcp(0xa, 0x1, 0x0)
+setsockopt$inet6_MCAST_JOIN_GROUP(r0, 0x29, 0x2a, ` +
+			`&(0x7f0000000000)={0x0, {{0xa, 0x0, 0x0, @rand_addr="ff020000000000000000000000000001"}}}, 0x88)`,
 		},
 	}
 	target, err := prog.GetTarget("linux", "amd64")

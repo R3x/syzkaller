@@ -85,6 +85,7 @@ func ctorLinux(target *targets.Target, kernelSrc, kernelObj string, ignores []*r
 		regexp.MustCompile(`^net/core/sock.c`),
 		regexp.MustCompile(`^net/core/skbuff.c`),
 		regexp.MustCompile(`^fs/proc/generic.c`),
+		regexp.MustCompile(`^trusty/`), // Trusty sources are not in linux kernel tree.
 	}
 	// These pattern do _not_ start a new report, i.e. can be in a middle of another report.
 	ctx.reportStartIgnores = []*regexp.Regexp{
@@ -248,7 +249,8 @@ func (ctx *linux) findReport(output []byte, oops *oops, startPos int, context st
 		if bytes.Contains(line, []byte("Disabling lock debugging due to kernel taint")) {
 			skipLine = true
 		} else if textLines > 25 &&
-			bytes.Contains(line, []byte("Kernel panic - not syncing")) {
+			(bytes.Contains(line, []byte("Kernel panic - not syncing")) ||
+				bytes.Contains(line, []byte("WARNING: possible circular locking dependency detected"))) {
 			// If panic_on_warn set, then we frequently have 2 stacks:
 			// one for the actual report (or maybe even more than one),
 			// and then one for panic caused by panic_on_warn. This makes
@@ -258,6 +260,9 @@ func (ctx *linux) findReport(output []byte, oops *oops, startPos int, context st
 			// before the panic, because sometimes we have, for example,
 			// a single WARNING line without a stack and then the panic
 			// with the stack.
+			// Oops messages frequently induce possible deadlock reports
+			// because oops reporting introduces unexpected locking chains.
+			// So if we have enough of the actual oops, strip the deadlock message.
 			skipText = true
 			skipLine = true
 		}
@@ -699,9 +704,12 @@ var linuxStackParams = &stackParams{
 		"lock_release",
 		"register_lock_class",
 		"spin_lock",
+		"spin_trylock",
 		"spin_unlock",
 		"raw_read_lock",
+		"raw_read_trylock",
 		"raw_write_lock",
+		"raw_write_trylock",
 		"down_read",
 		"down_write",
 		"down_read_trylock",
@@ -709,6 +717,7 @@ var linuxStackParams = &stackParams{
 		"up_read",
 		"up_write",
 		"mutex_lock",
+		"mutex_trylock",
 		"mutex_unlock",
 		"memcpy",
 		"memcmp",
@@ -1399,6 +1408,29 @@ var linuxOopses = []*oops{
 			{
 				title:        compile("unregister_netdevice: waiting for (?:.*) to become free"),
 				fmt:          "unregister_netdevice: waiting for DEV to become free",
+				noStackTrace: true,
+			},
+		},
+		[]*regexp.Regexp{},
+	},
+	{
+		[]byte("trusty: panic"),
+		[]oopsFormat{
+			{
+				title:        compile("trusty: panic.* ASSERT FAILED"),
+				report:       compile("trusty: panic \\(.*?\\):(?: DEBUG)? ASSERT FAILED at \\(.*?\\): (.+)"),
+				fmt:          "trusty: ASSERT FAILED: %[1]v",
+				noStackTrace: true,
+			},
+			{
+				title:     compile("trusty: panic.* ASSERT FAILED.*: *(.*)"),
+				fmt:       "trusty: ASSERT FAILED: %[1]v",
+				corrupted: true,
+			},
+			{
+				title:        compile("trusty: panic"),
+				report:       compile("trusty: panic \\(.*?\\): (.+)"),
+				fmt:          "trusty: panic: %[1]v",
 				noStackTrace: true,
 			},
 		},

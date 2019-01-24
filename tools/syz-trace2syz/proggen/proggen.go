@@ -53,7 +53,7 @@ func parseTree(tree *parser.TraceTree, pid int64, target *prog.Target, progs *[]
 type context struct {
 	builder           *prog.Builder
 	target            *prog.Target
-	callSelector      *callSelector
+	selectors         []callSelector
 	returnCache       returnCache
 	currentStraceCall *parser.Syscall
 	currentSyzCall    *prog.Call
@@ -63,10 +63,10 @@ type context struct {
 func genProg(trace *parser.Trace, target *prog.Target) *prog.Prog {
 	retCache := newRCache()
 	ctx := &context{
-		builder:      prog.MakeProgGen(target),
-		target:       target,
-		callSelector: newCallSelector(target, retCache),
-		returnCache:  retCache,
+		builder:     prog.MakeProgGen(target),
+		target:      target,
+		selectors:   newSelectors(target, retCache),
+		returnCache: retCache,
 	}
 	for _, sCall := range trace.Calls {
 		if sCall.Paused {
@@ -100,7 +100,7 @@ func (ctx *context) genCall() *prog.Call {
 	log.Logf(3, "parsing call: %s", ctx.currentStraceCall.CallName)
 	straceCall := ctx.currentStraceCall
 	ctx.currentSyzCall = new(prog.Call)
-	ctx.currentSyzCall.Meta = ctx.callSelector.Select(straceCall)
+	ctx.currentSyzCall.Meta = ctx.Select(straceCall)
 	syzCall := ctx.currentSyzCall
 	if ctx.currentSyzCall.Meta == nil {
 		log.Logf(2, "skipping call: %s which has no matching description", ctx.currentStraceCall.CallName)
@@ -118,6 +118,15 @@ func (ctx *context) genCall() *prog.Call {
 	}
 	ctx.genResult(syzCall.Meta.Ret, straceCall.Ret)
 	return syzCall
+}
+
+func (ctx *context) Select(syscall *parser.Syscall) *prog.Syscall {
+	for _, selector := range ctx.selectors {
+		if variant := selector.Select(syscall); variant != nil {
+			return variant
+		}
+	}
+	return ctx.target.SyscallMap[syscall.CallName]
 }
 
 func (ctx *context) genResult(syzType prog.Type, straceRet int64) {
@@ -203,7 +212,9 @@ func (ctx *context) genStruct(syzType *prog.StructType, traceType parser.IrType)
 	switch a := traceType.(type) {
 	case *parser.GroupType:
 		j := 0
-		ctx.reorderStructFields(syzType, a)
+		if ret, recursed := ctx.recurseStructs(syzType, a); recursed {
+			return ret
+		}
 		for i := range syzType.Fields {
 			if prog.IsPad(syzType.Fields[i]) {
 				args = append(args, syzType.Fields[i].DefaultArg())
@@ -228,6 +239,45 @@ func (ctx *context) genStruct(syzType *prog.StructType, traceType parser.IrType)
 		log.Fatalf("unsupported type for struct: %#v", a)
 	}
 	return prog.MakeGroupArg(syzType, args)
+}
+
+// recurseStructs handles cases where syzType corresponds to struct descriptions like
+// sockaddr_storage_in6 {
+//        addr    sockaddr_in6
+// } [size[SOCKADDR_STORAGE_SIZE], align_ptr]
+// which need to be recursively generated. It returns true if we needed to recurse
+// along with the generated argument and false otherwise.
+func (ctx *context) recurseStructs(syzType *prog.StructType, traceType *parser.GroupType) (prog.Arg, bool) {
+	// only consider structs with one non-padded field
+	numFields := 0
+	for _, field := range syzType.Fields {
+		if prog.IsPad(field) {
+			continue
+		}
+		numFields++
+	}
+	if numFields != 1 {
+		return nil, false
+	}
+	// the strace group type needs to have more one field (a mismatch)
+	if len(traceType.Elems) == 1 {
+		return nil, false
+	}
+	// first field needs to be a struct
+	switch t := syzType.Fields[0].(type) {
+	case *prog.StructType:
+		var args []prog.Arg
+		// first element and traceType should have the same number of elements
+		if len(t.Fields) != len(traceType.Elems) {
+			return nil, false
+		}
+		args = append(args, ctx.genStruct(t, traceType))
+		for _, field := range syzType.Fields[1:] {
+			args = append(args, field.DefaultArg())
+		}
+		return prog.MakeGroupArg(syzType, args), true
+	}
+	return nil, false
 }
 
 func (ctx *context) genUnionArg(syzType *prog.UnionType, straceType parser.IrType) prog.Arg {
@@ -333,8 +383,33 @@ func (ctx *context) genConst(syzType prog.Type, traceType parser.IrType) prog.Ar
 		}
 		return ctx.genConst(syzType, a.Elems[0])
 	case *parser.BufferType:
-		// The call almost certainly returned an errno
-		return syzType.DefaultArg()
+		// strace decodes some arguments as hex strings because those values are network ordered
+		// e.g. sin_port or sin_addr fields of sockaddr_in.
+		// network order is big endian byte order so if the len of byte array is 1, 2, 4, or 8 then
+		// it is a good chance that we are decoding one of those fields. If it isn't, then most likely
+		// we have an error i.e. a sockaddr_un struct passed to a connect call with an inet file descriptor
+		var val uint64
+		toUint64 := binary.LittleEndian.Uint64
+		toUint32 := binary.LittleEndian.Uint32
+		toUint16 := binary.LittleEndian.Uint16
+		if syzType.Format() == prog.FormatBigEndian {
+			toUint64 = binary.BigEndian.Uint64
+			toUint32 = binary.BigEndian.Uint32
+			toUint16 = binary.BigEndian.Uint16
+		}
+		switch len(a.Val) {
+		case 8:
+			val = toUint64([]byte(a.Val))
+		case 4:
+			val = uint64(toUint32([]byte(a.Val)))
+		case 2:
+			val = uint64(toUint16([]byte(a.Val)))
+		case 1:
+			val = uint64(a.Val[0])
+		default:
+			return syzType.DefaultArg()
+		}
+		return prog.MakeConstArg(syzType, val)
 	default:
 		log.Fatalf("unsupported type for const: %#v", traceType)
 	}
@@ -394,27 +469,6 @@ func (ctx *context) parseProc(syzType *prog.ProcType, traceType parser.IrType) p
 
 func (ctx *context) addr(syzType prog.Type, size uint64, data prog.Arg) prog.Arg {
 	return prog.MakePointerArg(syzType, ctx.builder.Allocate(size), data)
-}
-
-func (ctx *context) reorderStructFields(syzType *prog.StructType, traceType *parser.GroupType) {
-	// Sometimes strace reports struct fields out of order compared to our descriptions
-	// Example: 5704  bind(3, {sa_family=AF_INET6,
-	//				sin6_port=htons(8888),
-	//				inet_pton(AF_INET6, "::", &sin6_addr),
-	//				sin6_flowinfo=htonl(2206138368),
-	//				sin6_scope_id=2049825634}, 128) = 0
-	//	The flow_info and pton fields are switched in our description
-
-	switch syzType.TypeName {
-	case "sockaddr_in6":
-		log.Logf(5, "reordering in6. trace struct has %d elems", len(traceType.Elems))
-		if len(traceType.Elems) < 4 {
-			return
-		}
-		field2 := traceType.Elems[2]
-		traceType.Elems[2] = traceType.Elems[3]
-		traceType.Elems[3] = field2
-	}
 }
 
 func shouldSkip(c *parser.Syscall) bool {

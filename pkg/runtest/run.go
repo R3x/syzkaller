@@ -330,6 +330,9 @@ func (ctx *Context) createSyzTest(p *prog.Prog, sandbox string, threaded, cov bo
 		cfg.Flags |= ipc.FlagSignal
 		opts.Flags |= ipc.FlagCollectCover
 	}
+	if ctx.Features[host.FeatureExtraCoverage].Enabled {
+		cfg.Flags |= ipc.FlagExtraCover
+	}
 	if ctx.Features[host.FeatureNetworkInjection].Enabled {
 		cfg.Flags |= ipc.FlagEnableTun
 	}
@@ -519,11 +522,13 @@ func RunTest(req *RunRequest, executor string) {
 			req.Err = fmt.Errorf("run %v: hanged", run)
 			return
 		}
+		// Detach Signal and Cover because they point into the output shmem region.
 		for i := range info.Calls {
-			// Detach them because they point into the output shmem region.
 			info.Calls[i].Signal = append([]uint32{}, info.Calls[i].Signal...)
 			info.Calls[i].Cover = append([]uint32{}, info.Calls[i].Cover...)
 		}
+		info.Extra.Signal = append([]uint32{}, info.Extra.Signal...)
+		info.Extra.Cover = append([]uint32{}, info.Extra.Cover...)
 		req.Info = append(req.Info, info)
 	}
 }
