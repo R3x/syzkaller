@@ -19,27 +19,33 @@ func (ctx netbsd) build(targetArch, vmType, kernelDir, outputDir, compiler, user
 	cmdlineFile, sysctlFile string, config []byte) error {
 	const kernelName = "GENERIC_SYZKALLER"
 	confDir := fmt.Sprintf("%v/sys/arch/%v/conf", kernelDir, targetArch)
-	compileDir := fmt.Sprintf("%v/sys/arch/%v/compile/%v", kernelDir, targetArch, kernelName)
+	compileDir := fmt.Sprintf("%v/sys/arch/%v/compile/obj/%v", kernelDir, targetArch, kernelName)
 
-	if err := osutil.WriteFile(filepath.Join(confDir, kernelName), config); err != nil {
+	// Compile the kernel with KASAN
+	conf := []byte(`
+	include "arch/amd64/conf/GENERIC"
+	makeoptions    KASAN=1
+	options    KASAN
+	no options SVS
+	`)
+
+	if err := osutil.WriteFile(filepath.Join(confDir, kernelName), conf); err != nil {
 		return err
 	}
 
 	// Build tools before building kernel
-	if _, err := osutil.RunCmd(100*time.Minute, kernelDir, "./build.sh", "-m", targetArch, "-U", "-j"+strconv.Itoa(runtime.NumCPU())	, "tools"); err != nil {
-			return err
+	if _, err := osutil.RunCmd(10*time.Minute, kernelDir, "./build.sh", "-m", targetArch, "-U", "-j"+strconv.Itoa(runtime.NumCPU()), "tools"); err != nil {
+		return err
 	}
 
 	// Build kernel
-	if _, err := osutil.RunCmd(100*time.Minute, kernelDir, "./build.sh", "-m", targetArch, "-U", "-j"+strconv.Itoa(runtime.NumCPU()), "kernel="+kernelName); err != nil {
-			return err
+	if _, err := osutil.RunCmd(10*time.Minute, kernelDir, "./build.sh", "-m", targetArch, "-U", "-j"+strconv.Itoa(runtime.NumCPU()), "kernel="+kernelName); err != nil {
+		return err
 	}
 
 	for _, s := range []struct{ dir, src, dst string }{
 		{compileDir, "netbsd", "kernel"},
 		{compileDir, "netbsd.gdb", "netbsd.gdb"},
-		{userspaceDir, "image", "image"},
-		{userspaceDir, "key", "key"},
 	} {
 		fullSrc := filepath.Join(s.dir, s.src)
 		fullDst := filepath.Join(outputDir, s.dst)
