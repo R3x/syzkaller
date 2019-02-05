@@ -21,8 +21,6 @@ Instructions to set up syzkaller for a Linux Host and an amd64 NetBSD kernel.
 	$ ./build.sh -m amd64 -U -T ../tools -D ../dest distribution 
 	```	
 
-Now you can see the distribution build at 
-
 ## Installing and building Syzkaller on Linux Host
 	
 1. Install all the dependencies for Syzkaller (Go distribution can be downloaded from https://golang.org/dl/)
@@ -70,10 +68,15 @@ configure ssh.
 	PermitRootLogin without-password
 	```
 
-4. Copy your public key to `/root/.ssh/authorized_keys` on the guest and `reboot` the
+4. Now you should be able to ssh into the netbsd VM.
+	```sh
+	$ ssh -p 10022 root@127.0.0.1
+	```
+
+5. Copy your public key to `/root/.ssh/authorized_keys` on the guest and `reboot` the
    VM.
  
-5. After reboot make sure that the ssh is working properly. Replace the port with what
+6. After reboot make sure that the ssh is working properly. Replace the port with what
    you have configured. 
 	```sh
 	$ ssh -i path/to/netbsdkey -p 10022 root@127.0.0.1
