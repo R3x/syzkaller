@@ -58,14 +58,6 @@ type ExecOpts struct {
 	FaultNth  int // fault n-th operation in the call (0-based)
 }
 
-// ExecutorFailure is returned from MakeEnv or from env.Exec when executor terminates
-// by calling fail function. This is considered a logical error (a failed assert).
-type ExecutorFailure string
-
-func (err ExecutorFailure) Error() string {
-	return string(err)
-}
-
 // Config is the configuration for Env.
 type Config struct {
 	// Path to executor binary.
@@ -120,9 +112,7 @@ type Env struct {
 const (
 	outputSize = 16 << 20
 
-	statusFail  = 67
-	statusError = 68
-	statusRetry = 69
+	statusFail = 67
 
 	// Comparison types masks taken from KCOV headers.
 	compSizeMask  = 6
@@ -248,10 +238,9 @@ var rateLimit = time.NewTicker(1 * time.Second)
 // Exec starts executor binary to execute program p and returns information about the execution:
 // output: process output
 // info: per-call info
-// failed: true if executor has detected a kernel bug
 // hanged: program hanged and was killed
-// err0: failed to start process, or executor has detected a logical error
-func (env *Env) Exec(opts *ExecOpts, p *prog.Prog) (output []byte, info *ProgInfo, failed, hanged bool, err0 error) {
+// err0: failed to start the process or bug in executor itself
+func (env *Env) Exec(opts *ExecOpts, p *prog.Prog) (output []byte, info *ProgInfo, hanged bool, err0 error) {
 	// Copy-in serialized program.
 	progSize, err := p.SerializeForExec(env.in)
 	if err != nil {
@@ -281,8 +270,7 @@ func (env *Env) Exec(opts *ExecOpts, p *prog.Prog) (output []byte, info *ProgInf
 			return
 		}
 	}
-	var restart bool
-	output, failed, hanged, restart, err0 = env.cmd.exec(opts, progData)
+	output, hanged, err0 = env.cmd.exec(opts, progData)
 	if err0 != nil {
 		env.cmd.close()
 		env.cmd = nil
@@ -293,7 +281,7 @@ func (env *Env) Exec(opts *ExecOpts, p *prog.Prog) (output []byte, info *ProgInf
 	if info != nil && env.config.Flags&FlagSignal == 0 {
 		addFallbackSignal(p, info)
 	}
-	if restart {
+	if env.config.Flags&FlagUseForkServer == 0 {
 		env.cmd.close()
 		env.cmd = nil
 	}
@@ -697,12 +685,6 @@ func (c *command) handshakeError(err error) error {
 	output := <-c.readDone
 	err = fmt.Errorf("executor %v: %v\n%s", c.pid, err, output)
 	c.wait()
-	if c.cmd.ProcessState != nil {
-		// Magic values returned by executor.
-		if osutil.ProcessExitStatus(c.cmd.ProcessState) == statusFail {
-			err = ExecutorFailure(err.Error())
-		}
-	}
 	return err
 }
 
@@ -717,8 +699,7 @@ func (c *command) wait() error {
 	return err
 }
 
-func (c *command) exec(opts *ExecOpts, progData []byte) (output []byte, failed, hanged,
-	restart bool, err0 error) {
+func (c *command) exec(opts *ExecOpts, progData []byte) (output []byte, hanged bool, err0 error) {
 	req := &executeReq{
 		magic:     inMagic,
 		envFlags:  uint64(c.config.Flags),
@@ -756,7 +737,6 @@ func (c *command) exec(opts *ExecOpts, progData []byte) (output []byte, failed, 
 			hang <- false
 		}
 	}()
-	restart = c.config.Flags&FlagUseForkServer == 0
 	exitStatus := -1
 	completedCalls := (*uint32)(unsafe.Pointer(&c.outmem[0]))
 	outmem := c.outmem[4:]
@@ -804,27 +784,12 @@ func (c *command) exec(opts *ExecOpts, progData []byte) (output []byte, failed, 
 	}
 	if exitStatus == -1 {
 		exitStatus = osutil.ProcessExitStatus(c.cmd.ProcessState)
-		if exitStatus == 0 {
-			exitStatus = statusRetry // fuchsia always returns wrong exit status 0
-		}
 	}
-	// Handle magic values returned by executor.
-	switch exitStatus {
-	case statusFail:
-		err0 = ExecutorFailure(fmt.Sprintf("executor %v: failed: %s", c.pid, output))
-	case statusError:
-		err0 = fmt.Errorf("executor %v: detected kernel bug", c.pid)
-		failed = true
-	case statusRetry:
-		// This is a temporal error (ENOMEM) or an unfortunate
-		// program that messes with testing setup (e.g. kills executor
-		// loop process). Pretend that nothing happened.
-		// It's better than a false crash report.
-		err0 = nil
-		hanged = false
-		restart = true
-	default:
-		err0 = fmt.Errorf("executor %v: exit status %d", c.pid, exitStatus)
+	// Ignore all other errors.
+	// Without fork server executor can legitimately exit (program contains exit_group),
+	// with fork server the top process can exit with statusFail if it wants special handling.
+	if exitStatus == statusFail {
+		err0 = fmt.Errorf("executor %v: exit status %d\n%s", c.pid, exitStatus, output)
 	}
 	return
 }

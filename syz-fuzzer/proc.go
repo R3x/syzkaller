@@ -289,13 +289,7 @@ func (proc *Proc) executeRaw(opts *ipc.ExecOpts, p *prog.Prog, stat Stat) *ipc.P
 	proc.logProgram(opts, p)
 	for try := 0; ; try++ {
 		atomic.AddUint64(&proc.fuzzer.stats[stat], 1)
-		output, info, failed, hanged, err := proc.env.Exec(opts, p)
-		if failed {
-			// BUG in output should be recognized by manager.
-			log.Logf(0, "BUG: executor-detected bug:\n%s", output)
-			// Don't return any cover so that the input is not added to corpus.
-			return nil
-		}
+		output, info, hanged, err := proc.env.Exec(opts, p)
 		if err != nil {
 			if try > 10 {
 				log.Fatalf("executor %v failed %v times:\n%v", proc.pid, try, err)
@@ -305,7 +299,7 @@ func (proc *Proc) executeRaw(opts *ipc.ExecOpts, p *prog.Prog, stat Stat) *ipc.P
 			time.Sleep(time.Second)
 			continue
 		}
-		log.Logf(2, "result failed=%v hanged=%v: %s\n", failed, hanged, output)
+		log.Logf(2, "result hanged=%v: %s", hanged, output)
 		return info
 	}
 }

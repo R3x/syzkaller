@@ -7,7 +7,7 @@
 // - includes are hoisted to the top and deduplicated
 // - comments and empty lines are stripped
 // - NORETURN/PRINTF/debug are removed
-// - exitf/failf/fail are replaced with exit
+// - exitf/fail are replaced with exit
 // - uintN types are replaced with uintN_t
 // - [[FOO]] placeholders are replaced by actual values
 
@@ -233,6 +233,7 @@ static int fault_injected(int fail_fd)
 
 #if !GOOS_windows
 #if SYZ_EXECUTOR || SYZ_THREADED
+#include <errno.h>
 #include <pthread.h>
 
 static void thread_start(void* (*fn)(void*), void* arg)
@@ -241,9 +242,22 @@ static void thread_start(void* (*fn)(void*), void* arg)
 	pthread_attr_t attr;
 	pthread_attr_init(&attr);
 	pthread_attr_setstacksize(&attr, 128 << 10);
-	if (pthread_create(&th, &attr, fn, arg))
-		exitf("pthread_create failed");
-	pthread_attr_destroy(&attr);
+	int i;
+	// Clone can fail spuriously with EAGAIN if there is a concurrent execve in progress.
+	// (see linux kernel commit 498052bba55ec). But it can also be a true limit imposed by cgroups.
+	// In one case we want to retry infinitely, in another -- fail immidiately...
+	for (i = 0; i < 100; i++) {
+		if (pthread_create(&th, &attr, fn, arg) == 0) {
+			pthread_attr_destroy(&attr);
+			return;
+		}
+		if (errno == EAGAIN) {
+			usleep(50);
+			continue;
+		}
+		break;
+	}
+	exitf("pthread_create failed");
 }
 
 #endif
@@ -385,8 +399,6 @@ static long syz_execute_func(long text)
 #include "common_test.h"
 #elif GOOS_windows
 #include "common_windows.h"
-#elif GOOS_test
-#include "common_test.h"
 #else
 #error "unknown OS"
 #endif
@@ -425,7 +437,7 @@ static void loop(void)
 	}
 #endif
 #if SYZ_TRACE
-	printf("### start\n");
+	fprintf(stderr, "### start\n");
 #endif
 	int i, call, thread;
 #if SYZ_COLLIDE
@@ -600,11 +612,10 @@ static void loop(void)
 			break;
 		}
 #if SYZ_EXECUTOR
-		status = WEXITSTATUS(status);
-		if (status == kFailStatus)
+		if (WEXITSTATUS(status) == kFailStatus) {
+			errno = 0;
 			fail("child failed");
-		if (status == kErrorStatus)
-			error("child errored");
+		}
 		reply_execute(0);
 #endif
 #if SYZ_EXECUTOR || SYZ_USE_TMP_DIR

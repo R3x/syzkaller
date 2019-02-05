@@ -218,6 +218,7 @@ static int fault_injected(int fail_fd)
 
 #if !GOOS_windows
 #if SYZ_EXECUTOR || SYZ_THREADED
+#include <errno.h>
 #include <pthread.h>
 
 static void thread_start(void* (*fn)(void*), void* arg)
@@ -226,9 +227,19 @@ static void thread_start(void* (*fn)(void*), void* arg)
 	pthread_attr_t attr;
 	pthread_attr_init(&attr);
 	pthread_attr_setstacksize(&attr, 128 << 10);
-	if (pthread_create(&th, &attr, fn, arg))
-		exitf("pthread_create failed");
-	pthread_attr_destroy(&attr);
+	int i;
+	for (i = 0; i < 100; i++) {
+		if (pthread_create(&th, &attr, fn, arg) == 0) {
+			pthread_attr_destroy(&attr);
+			return;
+		}
+		if (errno == EAGAIN) {
+			usleep(50);
+			continue;
+		}
+		break;
+	}
+	exitf("pthread_create failed");
 }
 
 #endif
@@ -368,7 +379,7 @@ static void loop();
 static int do_sandbox_none(void)
 {
 	loop();
-	doexit(0);
+	return 0;
 }
 #endif
 
@@ -4281,6 +4292,14 @@ static long syz_errno(long v)
 }
 #endif
 
+#if SYZ_EXECUTOR || __NR_syz_exit
+static long syz_exit(long status)
+{
+	_exit(status);
+	return 0;
+}
+#endif
+
 #if SYZ_EXECUTOR || __NR_syz_compare
 #include <errno.h>
 #include <string.h>
@@ -4336,7 +4355,7 @@ static void loop();
 static int do_sandbox_none(void)
 {
 	loop();
-	doexit(0);
+	return 0;
 }
 #endif
 
@@ -4447,88 +4466,7 @@ static void loop();
 static int do_sandbox_none(void)
 {
 	loop();
-	doexit(0);
-}
-#endif
-
-#elif GOOS_test
-
-#include <stdlib.h>
-#include <unistd.h>
-
-#if SYZ_EXECUTOR || __NR_syz_mmap
-#include <sys/mman.h>
-static long syz_mmap(long a0, long a1)
-{
-	return (long)mmap((void*)a0, a1, PROT_READ | PROT_WRITE, MAP_ANON | MAP_PRIVATE | MAP_FIXED, -1, 0);
-}
-#endif
-
-#if SYZ_EXECUTOR || __NR_syz_errno
-#include <errno.h>
-static long syz_errno(long v)
-{
-	errno = v;
-	return v == 0 ? 0 : -1;
-}
-#endif
-
-#if SYZ_EXECUTOR || __NR_syz_compare
-#include <errno.h>
-#include <string.h>
-static long syz_compare(long want, long want_len, long got, long got_len)
-{
-	if (want_len != got_len) {
-		debug("syz_compare: want_len=%lu got_len=%lu\n", want_len, got_len);
-		errno = EBADF;
-		return -1;
-	}
-	if (memcmp((void*)want, (void*)got, want_len)) {
-		debug("syz_compare: data differs, want:\n");
-		debug_dump_data((char*)want, want_len);
-		debug("got:\n");
-		debug_dump_data((char*)got, got_len);
-		errno = EINVAL;
-		return -1;
-	}
 	return 0;
-}
-#endif
-
-#if SYZ_EXECUTOR || __NR_syz_compare_int
-#include <errno.h>
-#include <stdarg.h>
-static long syz_compare_int(long n, ...)
-{
-	va_list args;
-	va_start(args, n);
-	long v0 = va_arg(args, long);
-	long v1 = va_arg(args, long);
-	long v2 = va_arg(args, long);
-	long v3 = va_arg(args, long);
-	va_end(args);
-	if (n < 2 || n > 4)
-		return errno = E2BIG, -1;
-	if (n <= 2 && v2 != 0)
-		return errno = EFAULT, -1;
-	if (n <= 3 && v3 != 0)
-		return errno = EFAULT, -1;
-	if (v0 != v1)
-		return errno = EINVAL, -1;
-	if (n > 2 && v0 != v2)
-		return errno = EINVAL, -1;
-	if (n > 3 && v0 != v3)
-		return errno = EINVAL, -1;
-	return 0;
-}
-#endif
-
-#if SYZ_EXECUTOR || SYZ_SANDBOX_NONE
-static void loop();
-static int do_sandbox_none(void)
-{
-	loop();
-	doexit(0);
 }
 #endif
 
@@ -4570,7 +4508,7 @@ static void loop(void)
 	}
 #endif
 #if SYZ_TRACE
-	printf("### start\n");
+	fprintf(stderr, "### start\n");
 #endif
 	int i, call, thread;
 #if SYZ_COLLIDE
@@ -4726,11 +4664,10 @@ static void loop(void)
 			break;
 		}
 #if SYZ_EXECUTOR
-		status = WEXITSTATUS(status);
-		if (status == kFailStatus)
+		if (WEXITSTATUS(status) == kFailStatus) {
+			errno = 0;
 			fail("child failed");
-		if (status == kErrorStatus)
-			error("child errored");
+		}
 		reply_execute(0);
 #endif
 #if SYZ_EXECUTOR || SYZ_USE_TMP_DIR

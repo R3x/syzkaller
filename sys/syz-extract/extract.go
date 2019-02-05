@@ -21,7 +21,7 @@ import (
 )
 
 var (
-	flagOS        = flag.String("os", "", "target OS")
+	flagOS        = flag.String("os", runtime.GOOS, "target OS")
 	flagBuild     = flag.Bool("build", false, "regenerate arch-specific kernel headers")
 	flagSourceDir = flag.String("sourcedir", "", "path to kernel source checkout dir")
 	flagIncludes  = flag.String("includedirs", "", "path to other kernel source include dirs separated by commas")
@@ -245,6 +245,10 @@ func archFileList(os, arch string, files []string) (string, []string, []string, 
 		if err != nil || len(matches) == 0 {
 			return "", nil, nil, fmt.Errorf("failed to find sys files: %v", err)
 		}
+		manualFiles := map[string]bool{
+			// Not upstream, generated on https://github.com/multipath-tcp/mptcp_net-next
+			"mptcp.txt": true,
+		}
 		androidFiles := map[string]bool{
 			"tlk_device.txt": true,
 			// This was generated on:
@@ -253,7 +257,7 @@ func archFileList(os, arch string, files []string) (string, []string, []string, 
 		}
 		for _, f := range matches {
 			f = filepath.Base(f)
-			if os == "linux" && android != androidFiles[f] {
+			if manualFiles[f] || os == "linux" && android != androidFiles[f] {
 				continue
 			}
 			files = append(files, f)

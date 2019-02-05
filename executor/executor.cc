@@ -59,13 +59,9 @@ const int kCoverFd = kOutPipeFd - kMaxThreads;
 const int kMaxArgs = 9;
 const int kCoverSize = 256 << 10;
 const int kFailStatus = 67;
-const int kRetryStatus = 69;
-const int kErrorStatus = 68;
 
 // Logical error (e.g. invalid input program), use as an assert() alternative.
 static NORETURN PRINTF(1, 2) void fail(const char* msg, ...);
-// Kernel error (e.g. wrong syscall return value).
-NORETURN PRINTF(1, 2) void error(const char* msg, ...);
 // Just exit (e.g. due to temporal ENOMEM error).
 static NORETURN PRINTF(1, 2) void exitf(const char* msg, ...);
 static NORETURN void doexit(int status);
@@ -403,24 +399,17 @@ int main(int argc, char** argv)
 		fail("unknown sandbox type");
 	}
 #if SYZ_EXECUTOR_USES_FORK_SERVER
-	// Other statuses happen when fuzzer processes manages to kill loop.
-	if (status != kFailStatus && status != kErrorStatus)
-		status = kRetryStatus;
+	fprintf(stderr, "loop exited with status %d\n", status);
+	// Other statuses happen when fuzzer processes manages to kill loop, e.g. with:
+	// ptrace(PTRACE_SEIZE, 1, 0, 0x100040)
+	if (status != kFailStatus)
+		status = 0;
 	// If an external sandbox process wraps executor, the out pipe will be closed
 	// before the sandbox process exits this will make ipc package kill the sandbox.
 	// As the result sandbox process will exit with exit status 9 instead of the executor
-	// exit status (notably kRetryStatus). Consequently, ipc will treat it as hard
-	// failure rather than a temporal failure. So we duplicate the exit status on the pipe.
+	// exit status (notably kFailStatus). So we duplicate the exit status on the pipe.
 	reply_execute(status);
-	errno = 0;
-	if (status == kFailStatus)
-		fail("loop failed");
-	if (status == kErrorStatus)
-		error("loop errored");
-	// Loop can be killed by a test process with e.g.:
-	// ptrace(PTRACE_SEIZE, 1, 0, 0x100040)
-	// This is unfortunate, but I don't have a better solution than ignoring it for now.
-	exitf("loop exited with status %d", status);
+	doexit(status);
 	// Unreachable.
 	return 1;
 #else
@@ -1348,19 +1337,7 @@ void fail(const char* msg, ...)
 	vfprintf(stderr, msg, args);
 	va_end(args);
 	fprintf(stderr, " (errno %d)\n", e);
-	// ENOMEM/EAGAIN is frequent cause of failures in fuzzing context,
-	// so handle it here as non-fatal error.
-	doexit((e == ENOMEM || e == EAGAIN) ? kRetryStatus : kFailStatus);
-}
-
-void error(const char* msg, ...)
-{
-	va_list args;
-	va_start(args, msg);
-	vfprintf(stderr, msg, args);
-	va_end(args);
-	fprintf(stderr, "\n");
-	doexit(kErrorStatus);
+	doexit(kFailStatus);
 }
 
 void exitf(const char* msg, ...)
@@ -1371,7 +1348,7 @@ void exitf(const char* msg, ...)
 	vfprintf(stderr, msg, args);
 	va_end(args);
 	fprintf(stderr, " (errno %d)\n", e);
-	doexit(kRetryStatus);
+	doexit(0);
 }
 
 void debug(const char* msg, ...)

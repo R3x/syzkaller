@@ -25,7 +25,12 @@ type openbsd struct {
 }
 
 var (
-	openbsdSymbolizeRe = regexp.MustCompile(` at ([A-Za-z0-9_]+)\+0x([0-9a-f]+)`)
+	openbsdSymbolizeRe = []*regexp.Regexp{
+		// stack
+		regexp.MustCompile(` at ([A-Za-z0-9_]+)\+0x([0-9a-f]+)`),
+		// witness
+		regexp.MustCompile(`#[0-9]+ +([A-Za-z0-9_]+)\+0x([0-9a-f]+)`),
+	}
 )
 
 func ctorOpenbsd(target *targets.Target, kernelSrc, kernelObj string,
@@ -93,7 +98,13 @@ func (ctx *openbsd) Symbolize(rep *Report) error {
 
 func (ctx *openbsd) symbolizeLine(symbFunc func(bin string, pc uint64) ([]symbolizer.Frame, error),
 	line []byte) []byte {
-	match := openbsdSymbolizeRe.FindSubmatchIndex(line)
+	var match []int
+	for _, re := range openbsdSymbolizeRe {
+		match = re.FindSubmatchIndex(line)
+		if match != nil {
+			break
+		}
+	}
 	if match == nil {
 		return line
 	}
@@ -169,6 +180,30 @@ var openbsdOopses = []*oops{
 			{
 				title: compile("panic: pool_do_get: ([^:]+) free list modified"),
 				fmt:   "pool: free list modified: %[1]v",
+			},
+		},
+		[]*regexp.Regexp{},
+	},
+	{
+		[]byte("lock order reversal:"),
+		[]oopsFormat{
+			{
+				title: compile("lock order reversal:\\n+.*1st {{ADDR}} ([^\\ ]+).*\\n.*2nd {{ADDR}} ([^\\ ]+)"),
+				fmt:   "witness: reversal: %[1]v %[2]v",
+			},
+		},
+		[]*regexp.Regexp{},
+	},
+	{
+		[]byte("witness:"),
+		[]oopsFormat{
+			{
+				title: compile("witness: thread {{ADDR}} exiting with the following locks held:"),
+				fmt:   "witness: thread exiting with locks held",
+			},
+			{
+				title: compile("(witness: .*)"),
+				fmt:   "%[1]v",
 			},
 		},
 		[]*regexp.Regexp{},
