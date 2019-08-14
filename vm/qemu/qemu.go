@@ -152,7 +152,7 @@ var archConfigs = map[string]*archConfig{
 	"netbsd/amd64": {
 		Qemu:      "qemu-system-x86_64",
 		TargetDir: "/",
-		QemuArgs:  "-enable-kvm",
+		QemuArgs:  "",
 		NicModel:  ",model=e1000",
 	},
 	"fuchsia/amd64": {
