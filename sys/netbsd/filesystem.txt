@@ -1,0 +1,299 @@
+# Copyright 2018 syzkaller project authors. All rights reserved.
+# Use of this source code is governed by Apache 2 LICENSE that can be found in the LICENSE file.
+
+include <sys/types.h>
+include <sys/fstypes.h>
+
+mount(type ptr[in, string[filesystem]], dir ptr[in, filename], flags flags[mount_flags], data ptr[in, string, opt])
+unmount(dir ptr[in, filename], flags flags[umount_flags])
+
+filesystem = "msdos", "htfs", "ntfs", "ext4"
+
+blockdev_filename [
+	filename	filename
+	nbd		nbd_filename
+	loop		loop_filename
+	nullb		string["/dev/nullb0"]
+	md0		string["/dev/md0"]
+	sg0		string["/dev/sg0"]
+	sr0		string["/dev/sr0"]
+] [varlen]
+
+nbd_filename {
+	prefix	stringnoz["/dev/nbd"]
+	id	proc['0', 1, int8]
+	z	const[0, int8]
+} [packed]
+
+loop_filename {
+	prefix	stringnoz["/dev/loop"]
+	id	proc['0', 1, int8]
+	z	const[0, int8]
+} [packed]
+
+
+syz_mount_image$msdos(fs ptr[in, string["msdos"]], dir ptr[in, filename], size intptr, nsegs len[segments], segments ptr[in, array[fs_image_segment]])
+
+syz_mount_image$hfs(fs ptr[in, string["hfs"]], dir ptr[in, filename], size intptr, nsegs len[segments], segments ptr[in, array[fs_image_segment]], flags flags[mount_flags], opts ptr[in, fs_options[hfs_options]])
+
+syz_mount_image$ntfs(fs ptr[in, string["ntfs"]], dir ptr[in, filename], size intptr, nsegs len[segments], segments ptr[in, array[fs_image_segment]], flags flags[mount_flags], opts ptr[in, fs_options[ntfs_options]])
+
+syz_mount_image$ext4(fs ptr[in, string[ext4_types]], dir ptr[in, filename], size intptr, nsegs len[segments], segments ptr[in, array[fs_image_segment]], flags flags[mount_flags], opts ptr[in, fs_options[ext4_options]])
+
+ext4_types = "ext4", "ext3", "ext2"
+
+fs_image_segment {
+	data	ptr[in, array[int8]]
+	size	len[data, intptr]
+	offset	intptr
+}
+
+type fs_options[ELEMS] {
+	elems		array[fs_opt_elem[ELEMS]]
+	security	array[fs_opt_elem[fs_options_security]]
+	null		const[0, int8]
+} [packed]
+
+type fs_opt_elem[ELEMS] {
+	elem	ELEMS
+	comma	const[',', int8]
+} [packed]
+
+type fs_opt[NAME, TYPE] {
+	name	stringnoz[NAME]
+	eq	const['=', int8]
+	val	TYPE
+} [packed]
+
+type fs_opt_nodelim[NAME, TYPE] {
+	name	stringnoz[NAME]
+	val	TYPE
+} [packed]
+
+type fs_opt_str[NAME] fs_opt[NAME, stringnoz]
+type fs_opt_dec[NAME, VAL] fs_opt[NAME, fmt[dec, VAL]]
+type fs_opt_hex[NAME, VAL] fs_opt[NAME, fmt[hex, VAL]]
+type fs_opt_oct[NAME, VAL] fs_opt[NAME, fmt[oct, VAL]]
+type fs_opt_dec_suffix[NAME] fs_opt[NAME, array[flags[fs_opt_digits_suffix, int8]]]
+type fs_opt_filename[NAME] fs_opt[NAME, stringnoz[filename]]
+type fs_opt_codepage[NAME] fs_opt[NAME, stringnoz[codepages_names]]
+type fs_opt_cp_num[NAME] fs_opt[NAME, stringnoz[codepage_nums]]
+
+fs_opt_digits_suffix = '-', 'x', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'k', 'm', 'g', 't', 'p', 'e'
+
+fs_options_security [
+# Smack options:
+	smackfsdef		fs_opt_str["smackfsdef"]
+	smackfsfloor		fs_opt_str["smackfsfloor"]
+	smackfshat		fs_opt_str["smackfshat"]
+	smackfsroot		fs_opt_str["smackfsroot"]
+	smackfstransmute	fs_opt_str["smackfstransmute"]
+
+# IMA options:
+	measure			stringnoz["measure"]
+	dont_measure		stringnoz["dont_measure"]
+	appraise		stringnoz["appraise"]
+	dont_appraise		stringnoz["dont_appraise"]
+	audit			stringnoz["audit"]
+	hash			stringnoz["hash"]
+	dont_hash		stringnoz["dont_hash"]
+	permit_directio		stringnoz["permit_directio"]
+	obj_user		fs_opt_str["obj_user"]
+	obj_role		fs_opt_str["obj_role"]
+	obj_type		fs_opt_str["obj_type"]
+	subj_user		fs_opt_str["subj_user"]
+	subj_role		fs_opt_str["subj_role"]
+	subj_type		fs_opt_str["subj_type"]
+	func			fs_opt["func", stringnoz[ima_funcs]]
+	mask			fs_opt["mask", stringnoz[ima_masks]]
+	fsmagic			fs_opt_hex["fsmagic", intptr]
+	fsname			fs_opt_str["fsname"]
+	fsuuid			fs_opt["fsuuid", uuid_str]
+	uid_eq			fs_opt_dec["uid", uid]
+	euid_eq			fs_opt_dec["euid", uid]
+	fowner_eq		fs_opt_dec["fowner", uid]
+	uid_gt			fs_opt_nodelim["uid>", fmt[dec, uid]]
+	euid_gt			fs_opt_nodelim["euid>", fmt[dec, uid]]
+	fowner_gt		fs_opt_nodelim["fowner>", fmt[dec, uid]]
+	uid_lt			fs_opt_nodelim["uid<", fmt[dec, uid]]
+	euid_lt			fs_opt_nodelim["euid<", fmt[dec, uid]]
+	fowner_lt		fs_opt_nodelim["fowner<", fmt[dec, uid]]
+	appraise_type		stringnoz["appraise_type=imasig"]
+	pcr			fs_opt_dec["pcr", int64[0:64]]
+] [varlen]
+
+uuid_str {
+	p0	array[flags[hex_chars, int8], 8]
+	d0	const['-', int8]
+	p1	array[flags[hex_chars, int8], 4]
+	d1	const['-', int8]
+	p2	array[flags[hex_chars, int8], 4]
+	d2	const['-', int8]
+	p3	array[flags[hex_chars, int8], 4]
+	d3	const['-', int8]
+	p4	array[flags[hex_chars, int8], 8]
+}
+
+hex_chars = '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a', 'b', 'c', 'd', 'e', 'f'
+
+ima_funcs = "FILE_CHECK", "PATH_CHECK", "MODULE_CHECK", "FIRMWARE_CHECK", "FILE_MMAP", "MMAP_CHECK", "BPRM_CHECK", "CREDS_CHECK", "KEXEC_KERNEL_CHECK", "KEXEC_INITRAMFS_CHECK", "POLICY_CHECK"
+ima_masks = "MAY_EXEC", "MAY_WRITE", "MAY_READ", "MAY_APPEND", "^MAY_EXEC", "^MAY_WRITE", "^MAY_READ", "^MAY_APPEND"
+
+msdos_options [
+	fat	fat_options
+	nodots	stringnoz["nodots"]
+	dots	stringnoz["dots"]
+] [varlen]
+
+fat_options [
+	check_relaxed	stringnoz["check=relaxed"]
+	check_strict	stringnoz["check=strict"]
+	check_normal	stringnoz["check=normal"]
+	usefree		stringnoz["usefree"]
+	nocase		stringnoz["nocase"]
+	quiet		stringnoz["quiet"]
+	showexec	stringnoz["showexec"]
+	debug		stringnoz["debug"]
+	sys_immutable	stringnoz["sys_immutable"]
+	flush		stringnoz["flush"]
+	tz_utc		stringnoz["tz=UTC"]
+	errors_continue	stringnoz["errors=continue"]
+	errors_remount	stringnoz["errors=remount-ro"]
+	discard		stringnoz["discard"]
+	nfs		stringnoz["nfs"]
+	nfs_nostale_ro	stringnoz["nfs=nostale_ro"]
+	dos1xfloppy	stringnoz["dos1xfloppy"]
+	uid		fs_opt_hex["uid", uid]
+	gid		fs_opt_hex["gid", gid]
+	umask		fs_opt_oct["umask", int32]
+	dmask		fs_opt_oct["dmask", int32]
+	fmask		fs_opt_oct["fmask", int32]
+	allow_utime	fs_opt_oct["allow_utime", int32]
+	time_offset	fs_opt_hex["time_offset", int32[-1440:1440]]
+	codepage	fs_opt_cp_num["codepage"]
+] [varlen]
+
+hfs_options [
+	quiet		stringnoz["quiet"]
+	umask		fs_opt_oct["umask", int32]
+	file_umask	fs_opt_oct["file_umask", int32]
+	dir_umask	fs_opt_oct["dir_umask", int32]
+	uid		fs_opt_hex["uid", uid]
+	gid		fs_opt_hex["gid", gid]
+	part		fs_opt_hex["part", int32]
+	session		fs_opt_hex["session", int32]
+	type		fs_opt["type", array[int8, 4]]
+	creator		fs_opt["creator", array[int8, 4]]
+	codepage	fs_opt_codepage["codepage"]
+	iocharset	fs_opt_codepage["iocharset"]
+] [varlen]
+
+ntfs_options [
+	uid			fs_opt_hex["uid", uid]
+	gid			fs_opt_hex["gid", gid]
+	umask			fs_opt_oct["umask", int32]
+	fmask			fs_opt_oct["fmask", int32]
+	dmask			fs_opt_oct["dmask", int32]
+	mft_zone_multiplier	fs_opt_hex["mft_zone_multiplier", int32[-1:4]]
+	show_sys_files_no	stringnoz["show_sys_files=no"]
+	show_sys_files_yes	stringnoz["show_sys_files=yes"]
+	case_sensitive_no	stringnoz["case_sensitive=no"]
+	case_sensitive_yes	stringnoz["case_sensitive=yes"]
+	disable_sparse_no	stringnoz["disable_sparse=no"]
+	disable_sparse_yes	stringnoz["disable_sparse=yes"]
+	errors_remount		stringnoz["errors=remount-ro"]
+	errors_continue		stringnoz["errors=continue"]
+	errors_recover		stringnoz["errors=recover"]
+	nls			fs_opt_codepage["nls"]
+	utf8			stringnoz["utf8"]
+] [varlen]
+
+ext4_options [
+	bsddf			stringnoz["bsddf"]
+	minixdf			stringnoz["minixdf"]
+	grpid			stringnoz["grpid"]
+	bsdgroups		stringnoz["bsdgroups"]
+	nogrpid			stringnoz["nogrpid"]
+	sysvgroups		stringnoz["sysvgroups"]
+	errors_continue		stringnoz["errors=continue"]
+	errors_remount		stringnoz["errors=remount-ro"]
+	nouid32			stringnoz["nouid32"]
+	debug			stringnoz["debug"]
+	oldalloc		stringnoz["oldalloc"]
+	orlov			stringnoz["orlov"]
+	user_xattr		stringnoz["user_xattr"]
+	nouser_xattr		stringnoz["nouser_xattr"]
+	acl			stringnoz["acl"]
+	noacl			stringnoz["noacl"]
+	norecovery		stringnoz["norecovery"]
+	noload			stringnoz["noload"]
+	nobh			stringnoz["nobh"]
+	bh			stringnoz["bh"]
+	journal_checksum	stringnoz["journal_checksum"]
+	nojournal_checksum	stringnoz["nojournal_checksum"]
+	journal_async_commit	stringnoz["journal_async_commit"]
+	abort			stringnoz["abort"]
+	data_journal		stringnoz["data=journal"]
+	data_ordered		stringnoz["data=ordered"]
+	data_writeback		stringnoz["data=writeback"]
+	data_err_abort		stringnoz["data_err=abort"]
+	data_err_ignore		stringnoz["data_err=ignore"]
+	usrjquota		stringnoz["usrjquota="]
+	grpjquota		stringnoz["grpjquota="]
+	jqfmt_vfsold		stringnoz["jqfmt=vfsold"]
+	jqfmt_vfsv0		stringnoz["jqfmt=vfsv0"]
+	jqfmt_vfsv1		stringnoz["jqfmt=vfsv1"]
+	grpquota		stringnoz["grpquota"]
+	noquota			stringnoz["noquota"]
+	quota			stringnoz["quota"]
+	usrquota		stringnoz["usrquota"]
+	prjquota		stringnoz["prjquota"]
+	barrier			stringnoz["barrier"]
+	nobarrier		stringnoz["nobarrier"]
+	i_version		stringnoz["i_version"]
+	dax			stringnoz["dax"]
+	delalloc		stringnoz["delalloc"]
+	lazytime		stringnoz["lazytime"]
+	nolazytime		stringnoz["nolazytime"]
+	nodelalloc		stringnoz["nodelalloc"]
+	mblk_io_submit		stringnoz["mblk_io_submit"]
+	nomblk_io_submit	stringnoz["nomblk_io_submit"]
+	block_validity		stringnoz["block_validity"]
+	noblock_validity	stringnoz["noblock_validity"]
+	auto_da_alloc		stringnoz["auto_da_alloc"]
+	noauto_da_alloc		stringnoz["noauto_da_alloc"]
+	dioread_nolock		stringnoz["dioread_nolock"]
+	dioread_lock		stringnoz["dioread_lock"]
+	discard			stringnoz["discard"]
+	nodiscard		stringnoz["nodiscard"]
+	init_itable		stringnoz["init_itable"]
+	noinit_itable		stringnoz["noinit_itable"]
+	test_dummy_encryption	stringnoz["test_dummy_encryption"]
+	nombcache		stringnoz["nombcache"]
+	resgid			fs_opt_hex["resgid", gid]
+	resuid			fs_opt_hex["resuid", uid]
+	sb			fs_opt_hex["sb", int32]
+	commit			fs_opt_hex["commit", int32]
+	min_batch_time		fs_opt_hex["min_batch_time", int32]
+	max_batch_time		fs_opt_hex["max_batch_time", int32]
+	journal_dev		fs_opt_hex["journal_dev", int32]
+	barrier_val		fs_opt_hex["barrier", int32]
+	stripe			fs_opt_hex["stripe", int32]
+	debug_want_extra_isize	fs_opt_hex["debug_want_extra_isize", int32]
+	inode_readahead_blks	fs_opt_hex["inode_readahead_blks", flags[ext4_inode_readahead_blks]]
+	journal_ioprio		fs_opt_hex["journal_ioprio", int32[0:7]]
+	auto_da_alloc_val	fs_opt_hex["auto_da_alloc", int32]
+	init_itable_val		fs_opt_hex["init_itable", int32]
+	max_dir_size_kb		fs_opt_hex["max_dir_size_kb", int32]
+	journal_path		fs_opt_filename["journal_path"]
+	grpjquota_path		fs_opt_filename["grpjquota"]
+	usrjquota_path		fs_opt_filename["usrjquota"]
+] [varlen]
+
+ext4_inode_readahead_blks = 0, 1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 0x1000, 0x2000, 0x4000, 0x8000, 0x10000, 0x20000, 0x40000, 0x80000, 0x100000, 0x200000, 0x400000, 0x800000, 0x1000000, 0x2000000, 0x4000000, 0x8000000
+
+
+codepage_nums = "1250", "1251", "1255", "437", "737", "775", "850", "852", "855", "857", "860", "861", "862", "863", "864", "865", "866", "869", "874", "932", "936", "949", "950"
+codepages_names = "macceltic", "maccenteuro", "maccroatian", "maccyrillic", "macgaelic", "macgreek", "maciceland", "macinuit", "macroman", "macromanian", "macturkish", "ascii", "default", "cp1250", "cp1251", "cp1255", "cp437", "cp737", "cp775", "cp850", "cp852", "cp855", "cp857", "cp860", "cp861", "cp862", "cp863", "cp864", "cp865", "cp866", "cp869", "cp874", "cp932", "cp936", "cp949", "cp950", "euc-jp", "iso8859-13", "iso8859-14", "iso8859-15", "iso8859-1", "iso8859-2", "iso8859-3", "iso8859-4", "iso8859-5", "iso8859-6", "iso8859-7", "iso8859-9", "koi8-r", "koi8-ru", "koi8-u", "utf8", "none"
+mount_flags = MNT_RDONLY, MNT_SYNCHRONOUS, MNT_NOEXEC, MNT_NOSUID, MNT_NODEV, MNT_UNION, MNT_ASYNC, MNT_NOCOREDUMP, MNT_RELATIME, MNT_IGNORE, MNT_DISCARD, MNT_EXTATTR, MNT_LOG, MNT_NOATIME, MNT_AUTOMOUNTED, MNT_SYMPERM, MNT_NODEVMTIME, MNT_SOFTDEP
+umount_flags = MNT_RDONLY, MNT_SYNCHRONOUS, MNT_NOEXEC, MNT_NOSUID, MNT_NODEV, MNT_UNION, MNT_ASYNC, MNT_NOCOREDUMP, MNT_RELATIME, MNT_IGNORE, MNT_DISCARD, MNT_EXTATTR, MNT_LOG, MNT_NOATIME, MNT_AUTOMOUNTED, MNT_SYMPERM, MNT_NODEVMTIME, MNT_SOFTDEP
