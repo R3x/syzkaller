@@ -1,6 +1,6 @@
 # syzkaller - kernel fuzzer
 
-This is the repository for GSoC'19 project for [Enhancing support for Syzkaller](http://)
+This is the repository for GSoC'19 project for [Enhancing support for Syzkaller](http://github.com/google/syzkaller)
 
 I have also written a set of reports for the same:
 
